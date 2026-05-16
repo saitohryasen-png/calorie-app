@@ -201,6 +201,7 @@ export default function Home() {
   };
 
   const clearHistory = () => saveHistory([]);
+  const deleteEntry = (id: string) => saveHistory(history.filter((e) => e.id !== id));
 
   const historyTotalMin = history.reduce((s, e) => s + e.result.total_min, 0);
   const historyTotalMax = history.reduce((s, e) => s + e.result.total_max, 0);
@@ -422,10 +423,18 @@ export default function Home() {
                       {entry.result.dishes.map((d) => d.name).join('・')}
                     </p>
                   </div>
-                  <span className="text-green-700 font-semibold text-sm shrink-0 text-right">
-                    {entry.result.total_min}〜{entry.result.total_max}<br />
-                    <span className="text-xs font-normal">kcal</span>
-                  </span>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <span className="text-green-700 font-semibold text-sm text-right">
+                      {entry.result.total_min}〜{entry.result.total_max}<br />
+                      <span className="text-xs font-normal">kcal</span>
+                    </span>
+                    <button
+                      onClick={() => deleteEntry(entry.id)}
+                      className="text-xs text-gray-300 hover:text-red-400 transition"
+                    >
+                      削除
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
