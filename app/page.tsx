@@ -18,6 +18,7 @@ type Result = {
 type HistoryEntry = {
   id: string;
   thumbnail: string;
+  inputText?: string;
   result: Result;
   timestamp: number;
 };
@@ -66,8 +67,10 @@ function formatDate(ts: number) {
 }
 
 export default function Home() {
+  const [inputMode, setInputMode] = useState<'image' | 'text'>('image');
   const [preview, setPreview] = useState<string | null>(null);
   const [base64Data, setBase64Data] = useState<string | null>(null);
+  const [textInput, setTextInput] = useState('');
   const [result, setResult] = useState<Result | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -78,9 +81,15 @@ export default function Home() {
   const [editingGoal, setEditingGoal] = useState(false);
   const [goalInput, setGoalInput] = useState('2000');
 
+  const [isMobile, setIsMobile] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  useEffect(() => {
+    setIsMobile(/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
+  }, []);
 
   useEffect(() => {
     try {
@@ -158,23 +167,28 @@ export default function Home() {
   };
 
   const analyze = async () => {
-    if (!base64Data || !preview) return;
+    const isText = inputMode === 'text';
+    if (isText ? !textInput.trim() : !base64Data || !preview) return;
     setLoading(true);
     setError('');
     try {
+      const body = isText
+        ? { textInput }
+        : { base64Data, mediaType: 'image/jpeg' };
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base64Data, mediaType: 'image/jpeg' }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error('サーバーエラー');
       const data: Result = await res.json();
       setResult(data);
 
-      const thumbnail = await makeThumbnail(preview);
+      const thumbnail = isText ? '' : await makeThumbnail(preview!);
       const entry: HistoryEntry = {
         id: crypto.randomUUID(),
         thumbnail,
+        inputText: isText ? textInput : undefined,
         result: data,
         timestamp: Date.now(),
       };
@@ -212,64 +226,103 @@ export default function Home() {
 
         {/* メインカード */}
         <div className="bg-white rounded-2xl shadow-md border border-orange-100 p-6 space-y-4">
-          <h1 className="text-xl font-bold text-gray-900">🍽️ カロリー推定アプリ</h1>
+          <h1 className="text-xl font-bold text-gray-900">🍽️ カロリーチェッカー</h1>
 
-          {/* ドロップゾーン */}
-          <div
-            className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition
-              ${dragging ? 'border-green-500 bg-green-50' : 'border-orange-300 bg-orange-50 hover:bg-orange-100'}`}
-            onClick={() => fileInputRef.current?.click()}
-            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={handleDrop}
-          >
-            <p className="text-orange-700 font-medium text-sm">ここをタップ、またはドラッグ＆ドロップ</p>
-            <p className="text-orange-400 text-xs mt-1">JPG / PNG / WEBP</p>
-            <input
-              ref={fileInputRef}
-              type="file" accept="image/*"
-              className="hidden"
-              onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-            />
+          {/* タブ */}
+          <div className="flex rounded-xl overflow-hidden border border-orange-200">
+            <button
+              className={`flex-1 py-2 text-sm font-medium transition ${inputMode === 'image' ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-700 hover:bg-orange-100'}`}
+              onClick={() => { setInputMode('image'); setResult(null); setError(''); }}
+            >
+              🖼️ 画像で分析
+            </button>
+            <button
+              className={`flex-1 py-2 text-sm font-medium transition ${inputMode === 'text' ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-700 hover:bg-orange-100'}`}
+              onClick={() => { setInputMode('text'); setResult(null); setError(''); }}
+            >
+              ✏️ テキストで分析
+            </button>
           </div>
 
-          {/* カメラボタン */}
-          <button
-            className="w-full bg-orange-100 border border-orange-300 rounded-xl py-2 text-sm font-medium text-orange-800 hover:bg-orange-200 transition"
-            onClick={openCamera}
-          >
-            📷 カメラで撮影
-          </button>
-
-          {/* カメラビュー */}
-          {cameraOpen && (
-            <div className="rounded-xl overflow-hidden border border-gray-200 space-y-2">
-              <video ref={videoRef} autoPlay playsInline className="w-full rounded-t-xl" />
-              <div className="flex gap-2 px-2 pb-2">
-                <button onClick={capturePhoto} className="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 rounded-xl transition">
-                  📸 撮影する
-                </button>
-                <button onClick={stopCamera} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 rounded-xl transition">
-                  キャンセル
-                </button>
+          {inputMode === 'image' ? (
+            <>
+              {/* ドロップゾーン */}
+              <div
+                className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition
+                  ${dragging ? 'border-green-500 bg-green-50' : 'border-orange-300 bg-orange-50 hover:bg-orange-100'}`}
+                onClick={() => fileInputRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={handleDrop}
+              >
+                <p className="text-orange-700 font-medium text-sm">ここをタップ、またはドラッグ＆ドロップ</p>
+                <p className="text-orange-400 text-xs mt-1">JPG / PNG / WEBP</p>
+                <input
+                  ref={fileInputRef}
+                  type="file" accept="image/*"
+                  className="hidden"
+                  onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+                />
               </div>
-            </div>
-          )}
 
-          {/* プレビュー */}
-          {preview && (
-            <img src={preview} alt="プレビュー" className="w-full max-h-72 object-contain rounded-xl border border-gray-200" />
-          )}
+              {/* カメラボタン（スマートフォンでは非表示） */}
+              {!isMobile && (
+                <button
+                  className="w-full bg-orange-100 border border-orange-300 rounded-xl py-2 text-sm font-medium text-orange-800 hover:bg-orange-200 transition"
+                  onClick={openCamera}
+                >
+                  📷 カメラで撮影
+                </button>
+              )}
 
-          {/* 分析ボタン */}
-          {base64Data && (
-            <button
-              onClick={analyze}
-              disabled={loading}
-              className="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white font-semibold py-3 rounded-xl transition"
-            >
-              {loading ? '分析中...' : '✨ カロリーを分析する'}
-            </button>
+              {/* カメラビュー */}
+              {!isMobile && cameraOpen && (
+                <div className="rounded-xl overflow-hidden border border-gray-200 space-y-2">
+                  <video ref={videoRef} autoPlay playsInline className="w-full rounded-t-xl" />
+                  <div className="flex gap-2 px-2 pb-2">
+                    <button onClick={capturePhoto} className="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 rounded-xl transition">
+                      📸 撮影する
+                    </button>
+                    <button onClick={stopCamera} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 rounded-xl transition">
+                      キャンセル
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* プレビュー */}
+              {preview && (
+                <img src={preview} alt="プレビュー" className="w-full max-h-72 object-contain rounded-xl border border-gray-200" />
+              )}
+
+              {base64Data && (
+                <button
+                  onClick={analyze}
+                  disabled={loading}
+                  className="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white font-semibold py-3 rounded-xl transition"
+                >
+                  {loading ? '分析中...' : '✨ カロリーを分析する'}
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              {/* テキスト入力 */}
+              <textarea
+                value={textInput}
+                onChange={(e) => setTextInput(e.target.value)}
+                placeholder="例: ご飯1杯、唐揚げ3個、味噌汁1杯"
+                rows={4}
+                className="w-full border border-orange-200 rounded-xl px-4 py-3 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-300 resize-none bg-orange-50"
+              />
+              <button
+                onClick={analyze}
+                disabled={loading || !textInput.trim()}
+                className="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white font-semibold py-3 rounded-xl transition"
+              >
+                {loading ? '分析中...' : '✨ カロリーを分析する'}
+              </button>
+            </>
           )}
 
           {/* エラー */}
@@ -353,9 +406,18 @@ export default function Home() {
             <div className="space-y-2">
               {history.map((entry) => (
                 <div key={entry.id} className="flex items-center gap-3 border border-gray-100 rounded-xl p-3 bg-gray-50">
-                  <img src={entry.thumbnail} alt="" className="w-14 h-14 object-cover rounded-lg border border-gray-200 shrink-0" />
+                  {entry.thumbnail ? (
+                    <img src={entry.thumbnail} alt="" className="w-14 h-14 object-cover rounded-lg border border-gray-200 shrink-0" />
+                  ) : (
+                    <div className="w-14 h-14 flex items-center justify-center rounded-lg border border-orange-200 bg-orange-50 shrink-0 text-2xl">
+                      ✏️
+                    </div>
+                  )}
                   <div className="flex-1 min-w-0">
                     <p className="text-xs text-gray-400">{formatDate(entry.timestamp)}</p>
+                    {entry.inputText && (
+                      <p className="text-xs text-orange-500 truncate">{entry.inputText}</p>
+                    )}
                     <p className="text-sm text-gray-700 truncate">
                       {entry.result.dishes.map((d) => d.name).join('・')}
                     </p>
