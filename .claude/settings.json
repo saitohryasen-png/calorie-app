@@ -2,6 +2,9 @@
   "permissions": {
     "additionalDirectories": [
       "c:\\Users\\user\\Desktop\\Saito\\WebEn12\\graduationProject\\calorie-app\\app\\api\\analyze"
+    ],
+    "allow": [
+      "Bash(xargs grep -l \"body\\\\|size\\\\|limit\")"
     ]
   }
 }

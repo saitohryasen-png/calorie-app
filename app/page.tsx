@@ -15,10 +15,27 @@ type Result = {
   comment: string;
 };
 
+const MAX_PX = 1024;
+const JPEG_QUALITY = 0.82;
+
+function compressImage(dataUrl: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, MAX_PX / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', JPEG_QUALITY));
+    };
+    img.src = dataUrl;
+  });
+}
+
 export default function Home() {
   const [preview, setPreview] = useState<string | null>(null);
   const [base64Data, setBase64Data] = useState<string | null>(null);
-  const [mediaType, setMediaType] = useState('image/jpeg');
   const [result, setResult] = useState<Result | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -29,17 +46,18 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  const applyImage = async (dataUrl: string) => {
+    const compressed = await compressImage(dataUrl);
+    setPreview(compressed);
+    setBase64Data(compressed.split(',')[1]);
+    setResult(null);
+    setError('');
+  };
+
   const handleFile = (file: File) => {
     if (!file.type.startsWith('image/')) return;
-    setMediaType(file.type);
     const reader = new FileReader();
-    reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      setPreview(dataUrl);
-      setBase64Data(dataUrl.split(',')[1]);
-      setResult(null);
-      setError('');
-    };
+    reader.onload = (e) => applyImage(e.target?.result as string);
     reader.readAsDataURL(file);
   };
 
@@ -73,19 +91,15 @@ export default function Home() {
     setCameraOpen(false);
   };
 
-  const capturePhoto = () => {
+  const capturePhoto = async () => {
     const video = videoRef.current;
     if (!video) return;
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     canvas.getContext('2d')?.drawImage(video, 0, 0);
-    const dataUrl = canvas.toDataURL('image/jpeg');
-    setPreview(dataUrl);
-    setBase64Data(dataUrl.split(',')[1]);
-    setMediaType('image/jpeg');
-    setResult(null);
     stopCamera();
+    await applyImage(canvas.toDataURL('image/jpeg'));
   };
 
   const analyze = async () => {
@@ -96,7 +110,7 @@ export default function Home() {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base64Data, mediaType }),
+        body: JSON.stringify({ base64Data, mediaType: 'image/jpeg' }),
       });
       if (!res.ok) throw new Error('サーバーエラー');
       const data = await res.json();
@@ -147,12 +161,7 @@ export default function Home() {
         {/* カメラビュー */}
         {cameraOpen && (
           <div className="rounded-xl overflow-hidden border border-gray-200 space-y-2">
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              className="w-full rounded-t-xl"
-            />
+            <video ref={videoRef} autoPlay playsInline className="w-full rounded-t-xl" />
             <div className="flex gap-2 px-2 pb-2">
               <button
                 onClick={capturePhoto}
