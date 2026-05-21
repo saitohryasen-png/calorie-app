@@ -8,8 +8,15 @@ type Dish = {
   kcal_max: number;
 };
 
+type ExerciseItem = {
+  name: string;
+  kcal_min: number;
+  kcal_max: number;
+};
+
 type Result = {
-  dishes: Dish[];
+  dishes?: Dish[];
+  exercises?: ExerciseItem[];
   total_min: number;
   total_max: number;
   comment: string;
@@ -20,6 +27,7 @@ type HistoryEntry = {
   thumbnail: string;
   inputText?: string;
   result: Result;
+  type?: 'food' | 'exercise';
   timestamp: number;
 };
 
@@ -67,10 +75,11 @@ function formatDate(ts: number) {
 }
 
 export default function Home() {
-  const [inputMode, setInputMode] = useState<'image' | 'text'>('image');
+  const [inputMode, setInputMode] = useState<'image' | 'text' | 'exercise'>('image');
   const [preview, setPreview] = useState<string | null>(null);
   const [base64Data, setBase64Data] = useState<string | null>(null);
   const [textInput, setTextInput] = useState('');
+  const [exerciseInput, setExerciseInput] = useState('');
   const [result, setResult] = useState<Result | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -190,6 +199,37 @@ export default function Home() {
         thumbnail,
         inputText: isText ? textInput : undefined,
         result: data,
+        type: 'food',
+        timestamp: Date.now(),
+      };
+      saveHistory([entry, ...history]);
+    } catch {
+      setError('分析中にエラーが発生しました');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const analyzeExercise = async () => {
+    if (!exerciseInput.trim()) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/exercise', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ textInput: exerciseInput }),
+      });
+      if (!res.ok) throw new Error('サーバーエラー');
+      const data: Result = await res.json();
+      setResult(data);
+
+      const entry: HistoryEntry = {
+        id: crypto.randomUUID(),
+        thumbnail: '',
+        inputText: exerciseInput,
+        result: data,
+        type: 'exercise',
         timestamp: Date.now(),
       };
       saveHistory([entry, ...history]);
@@ -203,10 +243,18 @@ export default function Home() {
   const clearHistory = () => saveHistory([]);
   const deleteEntry = (id: string) => saveHistory(history.filter((e) => e.id !== id));
 
-  const historyTotalMin = history.reduce((s, e) => s + e.result.total_min, 0);
-  const historyTotalMax = history.reduce((s, e) => s + e.result.total_max, 0);
-  const historyMid = Math.round((historyTotalMin + historyTotalMax) / 2);
-  const barPercent = Math.min(100, Math.round((historyMid / dailyGoal) * 100));
+  const foodEntries = history.filter((e) => (e.type ?? 'food') === 'food');
+  const exerciseEntries = history.filter((e) => e.type === 'exercise');
+
+  const foodTotalMin = foodEntries.reduce((s, e) => s + (e.result?.total_min ?? 0), 0);
+  const foodTotalMax = foodEntries.reduce((s, e) => s + (e.result?.total_max ?? 0), 0);
+  const exTotalMin = exerciseEntries.reduce((s, e) => s + (e.result?.total_min ?? 0), 0);
+  const exTotalMax = exerciseEntries.reduce((s, e) => s + (e.result?.total_max ?? 0), 0);
+
+  const netMin = Math.max(0, foodTotalMin - exTotalMax);
+  const netMax = Math.max(0, foodTotalMax - exTotalMin);
+  const netMid = Math.round((netMin + netMax) / 2);
+  const barPercent = Math.min(100, Math.round((netMid / dailyGoal) * 100));
   const barColor =
     barPercent < 67 ? 'bg-green-500' : barPercent < 100 ? 'bg-yellow-500' : 'bg-red-500';
 
@@ -221,6 +269,12 @@ export default function Home() {
     setEditingGoal(false);
   };
 
+  const switchTab = (mode: 'image' | 'text' | 'exercise') => {
+    setInputMode(mode);
+    setResult(null);
+    setError('');
+  };
+
   return (
     <main className="min-h-screen bg-orange-50 flex items-center justify-center p-4">
       <div className="w-full max-w-lg space-y-4">
@@ -233,15 +287,21 @@ export default function Home() {
           <div className="flex rounded-xl overflow-hidden border border-orange-200">
             <button
               className={`flex-1 py-2 text-sm font-medium transition ${inputMode === 'image' ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-700 hover:bg-orange-100'}`}
-              onClick={() => { setInputMode('image'); setResult(null); setError(''); }}
+              onClick={() => switchTab('image')}
             >
-              🖼️ 画像で分析
+              🖼️ 画像
             </button>
             <button
-              className={`flex-1 py-2 text-sm font-medium transition ${inputMode === 'text' ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-700 hover:bg-orange-100'}`}
-              onClick={() => { setInputMode('text'); setResult(null); setError(''); }}
+              className={`flex-1 py-2 text-sm font-medium transition border-x border-orange-200 ${inputMode === 'text' ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-700 hover:bg-orange-100'}`}
+              onClick={() => switchTab('text')}
             >
-              ✏️ テキストで分析
+              ✏️ 食事
+            </button>
+            <button
+              className={`flex-1 py-2 text-sm font-medium transition ${inputMode === 'exercise' ? 'bg-blue-500 text-white' : 'bg-orange-50 text-orange-700 hover:bg-orange-100'}`}
+              onClick={() => switchTab('exercise')}
+            >
+              🏃 運動
             </button>
           </div>
 
@@ -306,9 +366,9 @@ export default function Home() {
                 </button>
               )}
             </>
-          ) : (
+          ) : inputMode === 'text' ? (
             <>
-              {/* テキスト入力 */}
+              {/* テキスト入力（食事） */}
               <textarea
                 value={textInput}
                 onChange={(e) => setTextInput(e.target.value)}
@@ -324,6 +384,24 @@ export default function Home() {
                 {loading ? '分析中...' : '✨ カロリーを分析する'}
               </button>
             </>
+          ) : (
+            <>
+              {/* テキスト入力（運動） */}
+              <textarea
+                value={exerciseInput}
+                onChange={(e) => setExerciseInput(e.target.value)}
+                placeholder="例: ジョギング30分、腕立て伏せ20回、スクワット30回"
+                rows={4}
+                className="w-full border border-blue-200 rounded-xl px-4 py-3 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none bg-blue-50"
+              />
+              <button
+                onClick={analyzeExercise}
+                disabled={loading || !exerciseInput.trim()}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-semibold py-3 rounded-xl transition"
+              >
+                {loading ? '計算中...' : '🔥 消費カロリーを計算する'}
+              </button>
+            </>
           )}
 
           {/* エラー */}
@@ -331,8 +409,8 @@ export default function Home() {
             <p className="text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm">{error}</p>
           )}
 
-          {/* 最新の結果 */}
-          {result && (
+          {/* 最新の結果（食事） */}
+          {result && result.dishes && (
             <div className="border border-gray-200 rounded-xl p-4 space-y-2 bg-gray-50">
               {result.dishes.map((d, i) => (
                 <div key={i} className="flex justify-between text-sm py-1.5 border-b border-gray-200">
@@ -341,7 +419,7 @@ export default function Home() {
                 </div>
               ))}
               <div className="flex justify-between font-bold pt-2 text-base">
-                <span className="text-gray-900">合計</span>
+                <span className="text-gray-900">摂取合計</span>
                 <span className="text-green-700">{result.total_min}〜{result.total_max} kcal</span>
               </div>
               {result.comment && (
@@ -350,13 +428,33 @@ export default function Home() {
               <p className="text-xs text-gray-500">※ 目視推定のため±30%程度の誤差があります</p>
             </div>
           )}
+
+          {/* 最新の結果（運動） */}
+          {result && result.exercises && (
+            <div className="border border-blue-200 rounded-xl p-4 space-y-2 bg-blue-50">
+              {result.exercises.map((ex, i) => (
+                <div key={i} className="flex justify-between text-sm py-1.5 border-b border-blue-200">
+                  <span className="text-gray-800">{ex.name}</span>
+                  <span className="text-blue-700 font-semibold">{ex.kcal_min}〜{ex.kcal_max} kcal</span>
+                </div>
+              ))}
+              <div className="flex justify-between font-bold pt-2 text-base">
+                <span className="text-gray-900">消費合計</span>
+                <span className="text-blue-700">{result.total_min}〜{result.total_max} kcal</span>
+              </div>
+              {result.comment && (
+                <p className="text-sm text-gray-600 pt-1 border-t border-blue-200">{result.comment}</p>
+              )}
+              <p className="text-xs text-gray-500">※ 体重・強度により個人差があります</p>
+            </div>
+          )}
         </div>
 
         {/* 履歴カード */}
         {history.length > 0 && (
           <div className="bg-white rounded-2xl shadow-md border border-orange-100 p-6 space-y-3">
             <div className="flex items-center justify-between">
-              <h2 className="font-bold text-gray-900">📋 分析履歴</h2>
+              <h2 className="font-bold text-gray-900">📋 本日の記録</h2>
               <button onClick={clearHistory} className="text-xs text-gray-400 hover:text-red-500 transition">
                 履歴を削除
               </button>
@@ -364,10 +462,20 @@ export default function Home() {
 
             {/* 累計カロリー */}
             <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium text-orange-800">累計カロリー</span>
+              <div className="flex justify-between text-sm text-gray-600">
+                <span>🍽️ 摂取</span>
+                <span className="text-green-700 font-medium">{foodTotalMin}〜{foodTotalMax} kcal</span>
+              </div>
+              {exerciseEntries.length > 0 && (
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>🏃 消費</span>
+                  <span className="text-blue-700 font-medium">−{exTotalMin}〜−{exTotalMax} kcal</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center border-t border-orange-200 pt-2">
+                <span className="text-sm font-medium text-orange-800">正味カロリー</span>
                 <span className="font-bold text-orange-700 text-lg">
-                  {historyTotalMin}〜{historyTotalMax} kcal
+                  {netMin}〜{netMax} kcal
                 </span>
               </div>
               <div className="w-full bg-orange-100 rounded-full h-3 overflow-hidden">
@@ -405,38 +513,43 @@ export default function Home() {
 
             {/* 履歴リスト */}
             <div className="space-y-2">
-              {history.map((entry) => (
-                <div key={entry.id} className="flex items-center gap-3 border border-gray-100 rounded-xl p-3 bg-gray-50">
-                  {entry.thumbnail ? (
-                    <img src={entry.thumbnail} alt="" className="w-14 h-14 object-cover rounded-lg border border-gray-200 shrink-0" />
-                  ) : (
-                    <div className="w-14 h-14 flex items-center justify-center rounded-lg border border-orange-200 bg-orange-50 shrink-0 text-2xl">
-                      ✏️
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-gray-400">{formatDate(entry.timestamp)}</p>
-                    {entry.inputText && (
-                      <p className="text-xs text-orange-500 truncate">{entry.inputText}</p>
+              {history.map((entry) => {
+                const isExercise = entry.type === 'exercise';
+                return (
+                  <div key={entry.id} className={`flex items-center gap-3 border rounded-xl p-3 ${isExercise ? 'border-blue-100 bg-blue-50' : 'border-gray-100 bg-gray-50'}`}>
+                    {entry.thumbnail ? (
+                      <img src={entry.thumbnail} alt="" className="w-14 h-14 object-cover rounded-lg border border-gray-200 shrink-0" />
+                    ) : (
+                      <div className={`w-14 h-14 flex items-center justify-center rounded-lg border shrink-0 text-2xl ${isExercise ? 'border-blue-200 bg-blue-100' : 'border-orange-200 bg-orange-50'}`}>
+                        {isExercise ? '🏃' : '✏️'}
+                      </div>
                     )}
-                    <p className="text-sm text-gray-700 truncate">
-                      {entry.result.dishes.map((d) => d.name).join('・')}
-                    </p>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-gray-400">{formatDate(entry.timestamp)}</p>
+                      {entry.inputText && (
+                        <p className={`text-xs truncate ${isExercise ? 'text-blue-500' : 'text-orange-500'}`}>{entry.inputText}</p>
+                      )}
+                      <p className="text-sm text-gray-700 truncate">
+                        {isExercise
+                          ? (entry.result?.exercises ?? []).map((ex) => ex.name).join('・')
+                          : (entry.result?.dishes ?? []).map((d) => d.name).join('・')}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <span className={`font-semibold text-sm text-right ${isExercise ? 'text-blue-700' : 'text-green-700'}`}>
+                        {isExercise && '−'}{entry.result?.total_min ?? '?'}〜{isExercise && '−'}{entry.result?.total_max ?? '?'}<br />
+                        <span className="text-xs font-normal">kcal</span>
+                      </span>
+                      <button
+                        onClick={() => deleteEntry(entry.id)}
+                        className="text-xs text-gray-300 hover:text-red-400 transition"
+                      >
+                        削除
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <span className="text-green-700 font-semibold text-sm text-right">
-                      {entry.result.total_min}〜{entry.result.total_max}<br />
-                      <span className="text-xs font-normal">kcal</span>
-                    </span>
-                    <button
-                      onClick={() => deleteEntry(entry.id)}
-                      className="text-xs text-gray-300 hover:text-red-400 transition"
-                    >
-                      削除
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
