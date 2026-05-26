@@ -127,6 +127,20 @@ export default function Home() {
     setError('');
   };
 
+  const loadDemoImage = async () => {
+    setError('');
+    try {
+      const res = await fetch('/demo.jpg');
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      const reader = new FileReader();
+      reader.onload = (e) => applyImage(e.target?.result as string);
+      reader.readAsDataURL(blob);
+    } catch {
+      setError('デモ画像の読み込みに失敗しました');
+    }
+  };
+
   const handleFile = (file: File) => {
     if (!file.type.startsWith('image/')) return;
     const reader = new FileReader();
@@ -325,6 +339,14 @@ export default function Home() {
                   onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
                 />
               </div>
+
+              {/* デモ画像ボタン */}
+              <button
+                className="w-full bg-orange-50 border border-dashed border-orange-300 rounded-xl py-2 text-sm font-medium text-orange-600 hover:bg-orange-100 transition"
+                onClick={loadDemoImage}
+              >
+                🍱 デモ画像を使う
+              </button>
 
               {/* カメラボタン（スマートフォンでは非表示） */}
               {!isMobile && (
